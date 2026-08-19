@@ -1,0 +1,21 @@
+# секреты — никогда в репозиторий
+.env
+.env.*
+!.env.example
+
+# данные
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+backups/
+
+# сборка и зависимости
+node_modules/
+dist/
+*.tsbuildinfo
+
+# прочее
+.DS_Store
+*.log
