@@ -22,7 +22,12 @@ CREATE TABLE transactions (
   amount_minor       INTEGER NOT NULL,          -- всегда > 0, знак задаёт direction
   currency           TEXT    NOT NULL CHECK (currency IN ('RUB','BYN','USD')),
   category_id        INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-  direction          TEXT    NOT NULL CHECK (direction IN ('expense','income','transfer')),
+  -- Перевод развёрнут на две стороны намеренно: при обмене валют
+  -- уходит одна сумма, а приходит другая (100 BYN → 29.41 USD),
+  -- и одной строкой это не выразить. Единый 'transfer' заставил бы
+  -- запрос баланса вычитать сумму на обеих сторонах.
+  direction          TEXT    NOT NULL
+                     CHECK (direction IN ('expense','income','transfer_out','transfer_in')),
   counter_account_id INTEGER REFERENCES accounts(id),
   note               TEXT,
   raw_text           TEXT,
@@ -30,8 +35,8 @@ CREATE TABLE transactions (
   created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
   CHECK (amount_minor > 0),
   -- перевод обязан указывать вторую сторону, обычная операция — не должна
-  CHECK (direction <> 'transfer' OR counter_account_id IS NOT NULL),
-  CHECK (direction =  'transfer' OR counter_account_id IS NULL)
+  CHECK ((direction IN ('transfer_out','transfer_in') AND counter_account_id IS NOT NULL)
+      OR (direction IN ('expense','income')          AND counter_account_id IS NULL))
 );
 
 CREATE INDEX idx_tx_ts       ON transactions(ts);

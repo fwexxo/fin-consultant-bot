@@ -40,14 +40,26 @@ test('foreign_keys включены', () => {
   assert.equal(rows[0]!.foreign_keys, 1);
 });
 
-test('транзакция-перевод обязана иметь counter_account_id', () => {
+test('обе стороны перевода обязаны иметь counter_account_id', () => {
+  const db = freshDb();
+  seedAccount(db);
+  for (const dir of ['transfer_out', 'transfer_in']) {
+    assert.throws(() => {
+      db.prepare(`INSERT INTO transactions
+        (ts,account_id,amount_minor,currency,direction,fx_rate_to_base)
+        VALUES ('2026-08-19',1,100,'BYN',?,100000000)`).run(dir);
+    }, /CHECK/, `${dir} без counter_account_id должен отвергаться`);
+  }
+});
+
+test('неизвестное направление отвергается', () => {
   const db = freshDb();
   seedAccount(db);
   assert.throws(() => {
     db.prepare(`INSERT INTO transactions
       (ts,account_id,amount_minor,currency,direction,fx_rate_to_base)
       VALUES ('2026-08-19',1,100,'BYN','transfer',100000000)`).run();
-  }, /CHECK/);
+  }, /CHECK/, 'слитный transfer больше не допускается');
 });
 
 test('расход не может иметь counter_account_id', () => {
