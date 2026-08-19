@@ -54,3 +54,41 @@ ssh root@203.0.113.10 'cd /opt/fin-bot && sudo -u finbot env HOME=/opt/fin-bot n
 
 Юнит выставляет `MemoryMax=700M`. Claude Agent SDK запускает `claude` CLI
 подпроцессом, и без потолка связка способна исчерпать RAM машины.
+
+## Фото и голосовые
+
+**Фото** уходят агенту напрямую картинкой — Claude мультимодален, сторонний
+сервис не нужен. Чек, экран заказа, выписка: агент достаёт суммы сам.
+
+**Голосовые** расшифровывает `whisper.cpp` на сервере. Установка:
+
+```bash
+apt-get install -y build-essential cmake git ffmpeg
+git clone --depth 1 https://github.com/ggml-org/whisper.cpp /opt/whisper.cpp
+cd /opt/whisper.cpp
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j1
+bash ./models/download-ggml-model.sh base
+ln -sf /opt/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
+```
+
+Затем в `.env`:
+
+```
+WHISPER_BIN=/usr/local/bin/whisper-cli
+WHISPER_MODEL=/opt/whisper.cpp/models/ggml-base.bin
+```
+
+Без этих переменных распознавание просто выключено — бот попросит написать
+текстом и продолжит работать.
+
+### Выбор модели
+
+Замерено на 1 ядре AMD EPYC с AVX2, русская речь:
+
+| Модель | Время на сообщение | Пик памяти | Качество |
+|---|---|---|---|
+| `base` | 5–6 сек | 285 МБ | суммы верно, редкие слова путает |
+| `small` | 21–24 сек | 747 МБ | верно всё |
+
+По умолчанию `base`. Переезд на `small` — правка `WHISPER_MODEL`, пересборка
+не нужна; заодно подними `MemoryMax` в юните.
