@@ -1,9 +1,10 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/index.ts';
 import { buildTools, TOOL_NAMES } from './tools.ts';
 import { listAccounts, accountBalance } from '../core/accounts.ts';
 import { formatMoney } from '../core/money.ts';
+import type { ImageAttachment } from '../bot/media.ts';
 
 export interface Turn {
   role: 'user' | 'assistant';
@@ -39,6 +40,30 @@ const SYSTEM_PROMPT = `Ты личный финансовый помощник �
 
 Ошибка в направлении — самая обидная: она разворачивает баланс в другую сторону.
 Если глагол неоднозначный, спроси.
+
+## Картинки
+
+Человек может прислать фото или скриншот — обычно это чек, экран заказа
+или банковская выписка. Смотри на изображение и доставай оттуда суммы.
+
+- **Чек из магазина** — бери ИТОГОВУЮ сумму, а не сумму отдельных позиций.
+  Магазин запиши в note, категорию подбери по содержимому.
+- **Экран заказа или корзины** — сложи позиции и запиши одной операцией,
+  перечислив товары в note. Если человек просит по отдельности — раздели.
+- **Выписка** — можешь записать несколько операций подряд.
+
+Валюта берётся С КАРТИНКИ. Если человек назвал счёт в другой валюте, чем
+цены на изображении, — не пересчитывай молча и не складывай разные валюты.
+Скажи, что видишь расхождение, и спроси, как записать.
+
+Если на картинке не видно суммы или цифры нечитаемы — скажи прямо, что
+не разобрал, и попроси написать сумму текстом. Не угадывай.
+
+## Голосовые
+
+Голосовое сообщение приходит уже расшифрованным в текст. Расшифровка бывает
+неточной: если сумма или валюта выглядят странно (например «пятьсот» там,
+где по смыслу «пять»), лучше переспроси, чем записать наугад.
 
 ## Валюты
 
@@ -117,6 +142,7 @@ export async function runAgent(
   deps: AgentDeps,
   message: string,
   history: Turn[],
+  images: ImageAttachment[] = [],
 ): Promise<string> {
   const { cfg, db } = deps;
   const today = () => new Date().toISOString().slice(0, 10);
@@ -127,7 +153,32 @@ export async function runAgent(
       .join('\n')}`
     : '';
 
-  const prompt = `${buildContext(db, cfg, today())}${historyBlock}\n\nСообщение: ${message}`;
+  const promptText = `${buildContext(db, cfg, today())}${historyBlock}\n\nСообщение: ${message}`;
+
+  // Без картинок хватает обычной строки. С картинками приходится собирать
+  // полноценное user-сообщение с блоками контента — строка их не вместит.
+  const prompt: string | AsyncIterable<SDKUserMessage> = images.length === 0
+    ? promptText
+    : (async function* single() {
+      yield {
+        type: 'user' as const,
+        parent_tool_use_id: null,
+        message: {
+          role: 'user' as const,
+          content: [
+            ...images.map((img) => ({
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: img.mediaType,
+                data: img.base64,
+              },
+            })),
+            { type: 'text' as const, text: promptText },
+          ],
+        },
+      };
+    }());
 
   // Берём текст ПОСЛЕДНЕГО ответа модели, а не склейку всех.
   // Промежуточные сообщения — это преамбулы перед вызовами инструментов

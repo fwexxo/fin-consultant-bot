@@ -1,4 +1,5 @@
 import { Bot, InlineKeyboard } from 'grammy';
+import type { Context } from 'grammy';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/index.ts';
 import type { Queue } from '../claude/queue.ts';
@@ -9,6 +10,8 @@ import { expensesByCategory, monthSummary, forecast } from '../core/reports.ts';
 import { dueSoon, markPaid } from '../core/recurring.ts';
 import { formatMoney } from '../core/money.ts';
 import { currentPeriod } from '../core/dates.ts';
+import { downloadTelegramFile, toImageAttachment, type ImageAttachment } from './media.ts';
+import type { Transcriber } from '../speech/whisper.ts';
 
 export { isOwner };
 
@@ -16,6 +19,8 @@ export interface BotDeps {
   cfg: Config;
   db: Db;
   queue: Queue;
+  /** Расшифровка голосовых. Не задана — бот попросит написать текстом. */
+  transcribe?: Transcriber;
 }
 
 const HISTORY_LIMIT = 10;
@@ -35,7 +40,7 @@ function keepTyping(send: () => Promise<unknown>): () => void {
 }
 
 export function createBot(deps: BotDeps): Bot {
-  const { cfg, db, queue } = deps;
+  const { cfg, db, queue, transcribe } = deps;
   const bot = new Bot(cfg.botToken);
 
   // История диалога живёт в памяти: после перезапуска бот начинает
@@ -186,15 +191,19 @@ export function createBot(deps: BotDeps): Bot {
     }
   });
 
-  bot.on('message:text', async (ctx) => {
-    const text = ctx.message.text.trim();
-    if (text.startsWith('/')) return;
-
+  /** Общий путь: прогнать через агента, ответить, запомнить. */
+  async function handle(
+    ctx: Context,
+    text: string,
+    userLabel: string,
+    images: ImageAttachment[] = [],
+  ) {
     const stopTyping = keepTyping(() => ctx.replyWithChatAction('typing'));
-
     try {
-      const answer = await queue.run(() => runAgent({ cfg, db }, text, [...history]));
-      remember('user', text);
+      const answer = await queue.run(
+        () => runAgent({ cfg, db }, text, [...history], images),
+      );
+      remember('user', userLabel);
       remember('assistant', answer);
       await ctx.reply(answer);
     } catch (err) {
@@ -203,6 +212,69 @@ export function createBot(deps: BotDeps): Bot {
     } finally {
       stopTyping();
     }
+  }
+
+  bot.on('message:text', async (ctx) => {
+    const text = ctx.message.text.trim();
+    if (text.startsWith('/')) return;
+    await handle(ctx, text, text);
+  });
+
+  bot.on('message:photo', async (ctx) => {
+    // Телеграм присылает лестницу размеров; последний — самый крупный.
+    const photos = ctx.message.photo;
+    const largest = photos[photos.length - 1];
+    if (!largest) {
+      await ctx.reply('Не увидел картинку.');
+      return;
+    }
+
+    const caption = ctx.message.caption?.trim() ?? '';
+    const stopTyping = keepTyping(() => ctx.replyWithChatAction('typing'));
+
+    let image: ImageAttachment;
+    try {
+      const buf = await downloadTelegramFile(ctx.api, cfg.botToken, largest.file_id);
+      image = toImageAttachment(buf);
+    } catch (err) {
+      stopTyping();
+      await ctx.reply(`Не смог получить картинку: ${(err as Error).message}`);
+      return;
+    }
+    stopTyping();
+
+    const text = caption || 'Разбери, что на картинке, и запиши операцию.';
+    await handle(ctx, text, `[фото] ${caption || 'без подписи'}`, [image]);
+  });
+
+  bot.on('message:voice', async (ctx) => {
+    if (!transcribe) {
+      await ctx.reply('Распознавание речи не настроено — напиши текстом.');
+      return;
+    }
+
+    const stopTyping = keepTyping(() => ctx.replyWithChatAction('typing'));
+    let text: string;
+    try {
+      const buf = await downloadTelegramFile(ctx.api, cfg.botToken, ctx.message.voice.file_id);
+      text = (await transcribe(buf)).trim();
+    } catch (err) {
+      stopTyping();
+      console.error('Расшифровка не удалась:', err);
+      await ctx.reply(`Не разобрал голосовое: ${(err as Error).message}`);
+      return;
+    }
+    stopTyping();
+
+    if (!text) {
+      await ctx.reply('В голосовом ничего не разобрал. Попробуй ещё раз или напиши текстом.');
+      return;
+    }
+
+    // Показываем расшифровку: если whisper ошибся, это сразу видно,
+    // и человек понимает, почему бот записал не то.
+    await ctx.reply(`🎤 «${text}»`);
+    await handle(ctx, text, `[голосовое] ${text}`);
   });
 
   bot.catch((err) => {

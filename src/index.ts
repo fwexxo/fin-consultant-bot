@@ -5,13 +5,27 @@ import { runMigrations } from './db/migrations.ts';
 import { Queue } from './claude/queue.ts';
 import { createBot } from './bot/index.ts';
 import { startReminders } from './jobs/reminders.ts';
+import { loadWhisperConfig, createWhisperTranscriber } from './speech/whisper.ts';
 
 const cfg = loadConfig(process.env);
 const db = openDatabase(cfg.databasePath);
 runMigrations(db);
 
 const queue = new Queue();
-const bot = createBot({ cfg, db, queue });
+
+const whisper = loadWhisperConfig(process.env);
+if (whisper) {
+  console.log(`Распознавание речи включено: ${whisper.modelPath} (${whisper.language})`);
+} else {
+  console.log('Распознавание речи выключено: WHISPER_BIN или WHISPER_MODEL не заданы');
+}
+
+const bot = createBot({
+  cfg,
+  db,
+  queue,
+  transcribe: whisper ? createWhisperTranscriber(whisper) : undefined,
+});
 
 if (cfg.ownerId === null) {
   console.warn(
