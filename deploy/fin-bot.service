@@ -1,0 +1,38 @@
+[Unit]
+Description=Финансовый консультант — телеграм-бот
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=finbot
+Group=finbot
+WorkingDirectory=/opt/fin-bot
+EnvironmentFile=/opt/fin-bot/.env
+
+# Claude Agent SDK запускает `claude` CLI подпроцессом, а тот пишет
+# состояние в $HOME. Без явного HOME он ушёл бы в /root.
+Environment=HOME=/opt/fin-bot
+Environment=NODE_ENV=production
+
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+# Жёсткий потолок памяти. На машине 2 ГБ, и без ограничения связка
+# «бот + подпроцесс claude» способна исчерпать RAM целиком.
+MemoryMax=700M
+MemoryHigh=600M
+
+# Права по минимуму: боту нужен только собственный каталог.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/fin-bot
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
