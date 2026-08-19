@@ -10,8 +10,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": false,
-    "verbatimModuleSyntax": false
+
+    // Импорты в исходниках пишутся с ".ts" — так их понимают tsx и
+    // штатный стриппинг типов в Node. На выходе компилятор переписывает
+    // их в ".js", как требует ESM-резолвер Node.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["src/**/*.ts"]
 }
