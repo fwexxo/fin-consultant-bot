@@ -25,18 +25,17 @@ const cat = (name: string): number | null => {
   return r?.id ?? null;
 };
 
-// Белорусская группа — 15-е число, BYN.
-// Все заводятся с плавающей суммой: точные величины владелец назовёт
-// при первой оплате. Записать сюда ноль было бы враньём в данных.
-const belarus: { title: string; category: string }[] = [
+// ПРИМЕРЫ регулярных платежей — замени своими.
+// Заводятся с плавающей суммой: точную величину бот спросит при
+// первой оплате. Записать сюда ноль было бы враньём в данных.
+const monthly: { title: string; category: string }[] = [
   { title: 'Аренда жилья', category: 'жильё' },
   { title: 'Коммунальные', category: 'коммуналка' },
   { title: 'Интернет', category: 'интернет' },
   { title: 'Мобильная связь', category: 'связь' },
-  { title: 'Спортзал', category: 'спорт' },
 ];
 
-for (const p of belarus) {
+for (const p of monthly) {
   createRecurring(db, {
     title: p.title,
     accountId: bynCard,
@@ -50,9 +49,9 @@ for (const p of belarus) {
   });
 }
 
-// Российская группа — последнее число месяца, RUB.
+// Пример платежа в другой валюте со сроком «последнее число месяца».
 createRecurring(db, {
-  title: 'Серверы',
+  title: 'Хостинг',
   accountId: rubCard,
   categoryId: cat('серверы'),
   amountMinor: null,

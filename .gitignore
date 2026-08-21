@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+mac/watcher.env
 
 # данные
 *.db

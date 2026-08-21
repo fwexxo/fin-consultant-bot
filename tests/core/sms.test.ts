@@ -11,7 +11,7 @@ test('покупка за границей: списываются рубли, �
   assert.equal(r.amountRub, 399.12);
   assert.deepEqual(r.original, { amount: 14, currency: 'BYN' });
   assert.equal(r.merchant, 'CAFE EXAMPLE');
-  assert.equal(r.balanceRub, 10 159.37);
+  assert.equal(r.balanceRub, 10159.37);
   assert.equal(r.time, '13:22');
 });
 
@@ -45,7 +45,7 @@ test('снятие наличных — отдельный вид, не расх
   assert.ok(r);
   assert.equal(r.kind, 'cash_withdrawal');
   assert.equal(r.amountRub, 50000, 'неразрывный пробел в сумме должен схлопываться');
-  assert.equal(r.balanceRub, 20 914.4);
+  assert.equal(r.balanceRub, 20914.4);
 });
 
 test('возврат покупки — доход', () => {
@@ -66,7 +66,7 @@ test('отмена покупки — доход', () => {
 test('обычный пробел в сумме тоже схлопывается', () => {
   const [r] = parseSms('Счёт карты MIR-0000 17:53 возврат покупки 659р Еда Баланс: 10 951.06р', CARD);
   assert.ok(r);
-  assert.equal(r.balanceRub, 10 951.06);
+  assert.equal(r.balanceRub, 10951.06);
 });
 
 test('чужой счёт игнорируется', () => {
@@ -121,7 +121,7 @@ test('внесение наличных в банкомат — не расхо�
   assert.ok(r);
   assert.equal(r.kind, 'cash_deposit');
   assert.equal(r.amountRub, 34000);
-  assert.equal(r.balanceRub, 50 010.9);
+  assert.equal(r.balanceRub, 50010.9);
 });
 
 test('отложенное уведомление с датой перед временем', () => {

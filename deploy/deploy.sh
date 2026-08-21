@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOST=${1:-root@203.0.113.10}
+HOST="${1:-${FINBOT_HOST:-}}"
+if [ -z "$HOST" ]; then
+  echo "Укажи сервер: ./deploy/deploy.sh root@ТВОЙ_СЕРВЕР"
+  echo "или задай переменную FINBOT_HOST"
+  exit 1
+fi
 APP=/opt/fin-bot
 
 echo "==> Сборка"

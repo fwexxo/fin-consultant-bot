@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Шаблон задания launchd. Все значения в двойных подчёркиваниях
+  подставляет mac/install.sh из переменных окружения — личных данных
+  в этом файле нет и быть не должно.
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>by.fwexxo.finbot.sms</string>
+  <string>local.finbot.sms</string>
 
-  <!-- ПУТИ ПОДСТАВЛЯЮТСЯ УСТАНОВЩИКОМ mac/install.sh -->
   <key>ProgramArguments</key>
   <array>
     <string>__NODE__</string>
@@ -15,15 +19,15 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>SMS_SINCE</key>
-    <string>2026-08-22</string>
+    <string>__SMS_SINCE__</string>
     <key>SMS_SENDER</key>
-    <string>900</string>
+    <string>__SMS_SENDER__</string>
     <key>SMS_CARD_PREFIX</key>
-    <string>Счёт карты MIR-0000</string>
+    <string>__SMS_CARD_PREFIX__</string>
     <key>SSH_TARGET</key>
-    <string>root@203.0.113.10</string>
+    <string>__SSH_TARGET__</string>
     <key>REMOTE_APP</key>
-    <string>/opt/fin-bot</string>
+    <string>__REMOTE_APP__</string>
     <key>PATH</key>
     <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>

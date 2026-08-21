@@ -53,12 +53,24 @@ const STATE_PATH = process.env.SMS_STATE
 const DB_PATH = process.env.MESSAGES_DB
   ?? join(homedir(), 'Library/Messages/chat.db');
 
+/** Обязательная настройка: без неё продолжать нельзя. */
+function required(name: string, value: string | undefined): string {
+  if (!value) {
+    console.error(`Не задана обязательная переменная ${name}`);
+    process.exit(2);
+  }
+  return value;
+}
+
 const SENDER = process.env.SMS_SENDER ?? '900';
-const CARD_PREFIX = process.env.SMS_CARD_PREFIX ?? 'Счёт карты MIR-0000';
-const SINCE_DATE = process.env.SMS_SINCE ?? '2026-08-22';
-const SSH_TARGET = process.env.SSH_TARGET ?? 'root@203.0.113.10';
 const REMOTE_APP = process.env.REMOTE_APP ?? '/opt/fin-bot';
 const BATCH_LIMIT = Number(process.env.SMS_BATCH_LIMIT ?? '50');
+
+// Ни адреса сервера, ни номера карты в коде нет: это личные данные
+// конкретной установки, а не часть программы.
+const SSH_TARGET = required('SSH_TARGET', process.env.SSH_TARGET);
+const CARD_PREFIX = required('SMS_CARD_PREFIX', process.env.SMS_CARD_PREFIX);
+const SINCE_DATE = required('SMS_SINCE', process.env.SMS_SINCE);
 
 interface State { lastRowid: number }
 
