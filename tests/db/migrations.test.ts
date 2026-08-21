@@ -28,10 +28,10 @@ test('миграции создают все таблицы', () => {
 
 test('миграции идемпотентны', () => {
   const db = openDatabase(':memory:');
-  assert.equal(runMigrations(db), 1);
-  assert.equal(runMigrations(db), 1);
+  const first = runMigrations(db);
+  assert.equal(runMigrations(db), first, 'повтор не должен менять версию');
   const n = db.prepare('SELECT COUNT(*) c FROM schema_migrations').get() as { c: number };
-  assert.equal(n.c, 1);
+  assert.equal(n.c, first, 'записей должно быть ровно столько же, сколько миграций');
 });
 
 test('foreign_keys включены', () => {

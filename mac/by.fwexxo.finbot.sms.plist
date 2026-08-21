@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>by.fwexxo.finbot.sms</string>
+
+  <!-- ПУТИ ПОДСТАВЛЯЮТСЯ УСТАНОВЩИКОМ mac/install.sh -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__APP__/dist/mac/watch-sms.js</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SMS_SINCE</key>
+    <string>2026-08-22</string>
+    <key>SMS_SENDER</key>
+    <string>900</string>
+    <key>SMS_CARD_PREFIX</key>
+    <string>Счёт карты MIR-0000</string>
+    <key>SSH_TARGET</key>
+    <string>root@203.0.113.10</string>
+    <key>REMOTE_APP</key>
+    <string>/opt/fin-bot</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- Раз в 5 минут: чаще нет смысла, банк и так шлёт с задержкой. -->
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__LOGDIR__/sms-watch.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOGDIR__/sms-watch.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

@@ -7,6 +7,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 export const MIGRATIONS: { version: number; file: string }[] = [
   { version: 1, file: '001_initial.sql' },
+  { version: 2, file: '002_sms.sql' },
 ];
 
 /** Применяет недостающие миграции. Возвращает итоговую версию схемы. */
