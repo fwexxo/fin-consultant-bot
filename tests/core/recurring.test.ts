@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { testDb, flatRate, fixedRates } from '../helpers.ts';
 import { openDatabase } from '../../src/db/index.ts';
 import { runMigrations } from '../../src/db/migrations.ts';
 import { createAccount, accountBalance } from '../../src/core/accounts.ts';
@@ -8,14 +9,13 @@ import {
 } from '../../src/core/recurring.ts';
 
 function setup() {
-  const db = openDatabase(':memory:');
-  runMigrations(db);
+  const db = testDb();
   const byn = createAccount(db, { name: 'BYN', currency: 'BYN', kind: 'card' });
   const rub = createAccount(db, { name: 'RUB', currency: 'RUB', kind: 'card' });
   return { db, byn, rub };
 }
 
-const rate = (v: number) => async () => v;
+const rate = (v: number) => flatRate(v);
 
 test('белорусские платежи 15-го числа', () => {
   const { db, byn } = setup();

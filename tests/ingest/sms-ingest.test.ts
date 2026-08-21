@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { testDb, flatRate, fixedRates } from '../helpers.ts';
 import { openDatabase } from '../../src/db/index.ts';
 import { runMigrations } from '../../src/db/migrations.ts';
 import { createAccount, accountBalance, listAccounts } from '../../src/core/accounts.ts';
@@ -13,8 +14,7 @@ const OPTS = {
 };
 
 function setup() {
-  const db = openDatabase(':memory:');
-  runMigrations(db);
+  const db = testDb();
   const card = createAccount(db, { name: 'Карта RUB', currency: 'RUB', kind: 'card' });
   return { db, card };
 }
@@ -149,8 +149,7 @@ test('чужие и нераспознанные сообщения считаю
 });
 
 test('отсутствие счёта карты — явная ошибка, а не тихий пропуск', async () => {
-  const db = openDatabase(':memory:');
-  runMigrations(db);
+  const db = testDb();
   await assert.rejects(
     () => ingestSms(db, [sms(1, '2026-08-22', 'Счёт карты MIR-0000 13:22 Покупка 100р М Баланс: 900р')], OPTS),
     /Карта RUB/,

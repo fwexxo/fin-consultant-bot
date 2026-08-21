@@ -2,7 +2,7 @@ import type { Currency } from '../config.ts';
 import type { Db } from '../db/index.ts';
 import { dueDateFor, type IsoDate, type Period } from './dates.ts';
 import { recordTransaction } from './transactions.ts';
-import type { RateFetcher } from './fx.ts';
+import type { RatesFetcher } from './fx.ts';
 
 export interface RecurringInput {
   title: string;
@@ -108,7 +108,7 @@ export async function markPaid(
   instanceId: number,
   amountMinor: number,
   today: IsoDate,
-  rateFetcher?: RateFetcher,
+  rateFetcher?: RatesFetcher,
 ): Promise<number> {
   const inst = db.prepare(`
     SELECT pi.id, pi.status, r.account_id, r.category_id, r.title

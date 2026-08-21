@@ -2,14 +2,21 @@ import { z } from 'zod';
 import { tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import type { Db } from '../db/index.ts';
 import { runReadOnlyQuery } from '../core/query.ts';
-import { listAccounts, accountBalance, getAccount } from '../core/accounts.ts';
+import {
+  listAccounts, accountBalance, getAccount, createAccount,
+} from '../core/accounts.ts';
 import { recordTransaction, recordTransfer } from '../core/transactions.ts';
-import { dueSoon, markPaid } from '../core/recurring.ts';
-import { toMinor, formatMoney, convertMinor, RATE_SCALE } from '../core/money.ts';
-import { getRate } from '../core/fx.ts';
+import { dueSoon, markPaid, createRecurring, listRecurring } from '../core/recurring.ts';
+import {
+  toMinor, formatMoney, convertMinor, RATE_SCALE,
+  isKnownCurrency, knownCurrencies, loadCurrencies,
+} from '../core/money.ts';
+import { getRate, getBaseCurrency } from '../core/fx.ts';
 import type { Currency } from '../config.ts';
 
-const CURRENCY = z.enum(['RUB', 'BYN', 'USD']);
+// Валюта — трёхбуквенный код, а не перечисление: список живёт в базе
+// и пополняется человеком через add_currency.
+const CURRENCY = z.string().regex(/^[A-Za-z]{3}$/, 'код валюты из трёх букв');
 const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'дата в формате YYYY-MM-DD');
 
 function ok(text: string) {
@@ -29,6 +36,18 @@ async function guard(fn: () => Promise<string> | string) {
   }
 }
 
+/** Приводит код к верхнему регистру и проверяет, что валюта известна. */
+function normalizeCurrency(code: string): Currency {
+  const upper = code.toUpperCase();
+  if (!isKnownCurrency(upper)) {
+    throw new Error(
+      `Валюта ${upper} не заведена. Известные: ${knownCurrencies().join(', ')}. `
+      + 'Добавь её инструментом add_currency.',
+    );
+  }
+  return upper;
+}
+
 function categoryId(db: Db, name: string | undefined, kind: 'expense' | 'income'): number | null {
   if (!name) return null;
   const row = db.prepare('SELECT id FROM categories WHERE name = ? AND kind = ?')
@@ -37,6 +56,12 @@ function categoryId(db: Db, name: string | undefined, kind: 'expense' | 'income'
 }
 
 export function buildTools(db: Db, today: () => string) {
+  /** Перечитывает справочник валют после его пополнения. */
+  const reloadCurrencies = () => {
+    loadCurrencies(db.prepare('SELECT code, minor_units FROM currencies').all() as
+      { code: string; minor_units: number }[]);
+  };
+
   const recordExpense = tool(
     'record_expense',
     'Записать расход. Используй, когда человек сообщает, что потратил деньги.',
@@ -50,7 +75,7 @@ export function buildTools(db: Db, today: () => string) {
     },
     async (args) => guard(async () => {
       const account = getAccount(db, args.account_id);
-      const amountMinor = toMinor(args.amount, args.currency as Currency);
+      const amountMinor = toMinor(args.amount, normalizeCurrency(args.currency));
       const id = await recordTransaction(db, {
         ts: args.date ?? today(),
         accountId: args.account_id,
@@ -79,7 +104,7 @@ export function buildTools(db: Db, today: () => string) {
     },
     async (args) => guard(async () => {
       const account = getAccount(db, args.account_id);
-      const amountMinor = toMinor(args.amount, args.currency as Currency);
+      const amountMinor = toMinor(args.amount, normalizeCurrency(args.currency));
       const id = await recordTransaction(db, {
         ts: args.date ?? today(),
         accountId: args.account_id,
@@ -245,22 +270,23 @@ export function buildTools(db: Db, today: () => string) {
 
   const exchangeRate = tool(
     'get_exchange_rate',
-    'Курс валюты к BYN по данным Нацбанка РБ на дату. Возвращает, сколько BYN стоит '
-    + 'одна единица валюты. Ходит в сеть, если курса нет в кеше.',
+    'Курс валюты к базовой на дату: сколько базовой валюты стоит одна единица. '
+    + 'Ходит в сеть, если курса нет в кеше.',
     {
       currency: CURRENCY,
       date: ISO_DATE.optional().describe('по умолчанию сегодня'),
     },
     async (args) => guard(async () => {
       const date = args.date ?? today();
-      const stored = await getRate(db, args.currency as Currency, date);
-      return `1 ${args.currency} = ${(stored / RATE_SCALE).toFixed(4)} BYN на ${date}`;
+      const code = normalizeCurrency(args.currency);
+      const stored = await getRate(db, code, date);
+      return `1 ${code} = ${(stored / RATE_SCALE).toFixed(4)} ${getBaseCurrency()} на ${date}`;
     }),
   );
 
   const totalInBase = tool(
     'total_in_base',
-    'Суммарные деньги на всех счетах, пересчитанные в BYN по текущему курсу Нацбанка. '
+    'Суммарные деньги на всех счетах, пересчитанные в базовую валюту по текущему курсу. '
     + 'Используй для вопросов «сколько у меня всего».',
     {},
     async () => guard(async () => {
@@ -274,11 +300,151 @@ export function buildTools(db: Db, today: () => string) {
         const rate = await getRate(db, a.currency, date);
         const inBase = convertMinor(balance, rate);
         total += inBase;
-        parts.push(`  ${a.name}: ${formatMoney(balance, a.currency)} = ${formatMoney(inBase, 'BYN')}`);
+        parts.push(`  ${a.name}: ${formatMoney(balance, a.currency)} = ${formatMoney(inBase, getBaseCurrency())}`);
       }
 
       if (parts.length === 0) return 'На счетах пусто';
-      return `${parts.join('\n')}\n  ИТОГО: ${formatMoney(total, 'BYN')} (курс НБРБ на ${date})`;
+      return `${parts.join('\n')}\n  ИТОГО: ${formatMoney(total, getBaseCurrency())} (курс на ${date})`;
+    }),
+  );
+
+  const addAccount = tool(
+    'create_account',
+    'Завести новый счёт: карту, наличные или вклад. Используй, когда человек '
+    + 'просит добавить счёт, кошелёк или карту в новой валюте.',
+    {
+      name: z.string().min(1).describe('название, например «Карта EUR» или «Наличные»'),
+      currency: CURRENCY,
+      kind: z.enum(['cash', 'card', 'deposit']).describe('наличные, карта или вклад'),
+    },
+    async (args) => guard(() => {
+      const currency = normalizeCurrency(args.currency);
+      const id = createAccount(db, { name: args.name, currency, kind: args.kind });
+      return `Счёт создан (id=${id}): «${args.name}», ${currency}, остаток 0`;
+    }),
+  );
+
+  const renameAccount = tool(
+    'rename_account',
+    'Переименовать счёт.',
+    { account_id: z.number().int(), new_name: z.string().min(1) },
+    async (args) => guard(() => {
+      const acc = getAccount(db, args.account_id);
+      db.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(args.new_name, acc.id);
+      return `«${acc.name}» теперь «${args.new_name}»`;
+    }),
+  );
+
+  const archiveAccount = tool(
+    'archive_account',
+    'Убрать счёт из списка. Операции по нему сохраняются — счёт просто '
+    + 'перестаёт показываться и участвовать в отчётах.',
+    { account_id: z.number().int() },
+    async (args) => guard(() => {
+      const acc = getAccount(db, args.account_id);
+      const balance = accountBalance(db, acc.id);
+      if (balance !== 0) {
+        // Скрыть счёт с деньгами значит потерять их из виду в отчётах.
+        return `На счёте «${acc.name}» ещё ${formatMoney(balance, acc.currency)}. `
+          + 'Переведи остаток на другой счёт, потом убирай.';
+      }
+      db.prepare('UPDATE accounts SET is_active = 0 WHERE id = ?').run(acc.id);
+      return `Счёт «${acc.name}» убран из списка`;
+    }),
+  );
+
+  const addCurrency = tool(
+    'add_currency',
+    'Добавить валюту, которой ещё нет в списке. minor_units — сколько дробных '
+    + 'единиц в основной: 2 для большинства валют, 0 для иены и воны, 3 для динаров.',
+    {
+      code: z.string().regex(/^[A-Za-z]{3}$/).describe('код по ISO 4217, например SGD'),
+      name: z.string().min(1),
+      minor_units: z.number().int().min(0).max(4).default(2),
+    },
+    async (args) => guard(() => {
+      const code = args.code.toUpperCase();
+      if (isKnownCurrency(code)) return `Валюта ${code} уже есть`;
+
+      db.prepare(
+        'INSERT INTO currencies (code, name, minor_units) VALUES (?,?,?)',
+      ).run(code, args.name, args.minor_units);
+
+      // Обновляем справочник в памяти, иначе валюта останется неизвестной
+      // до перезапуска бота.
+      reloadCurrencies();
+      return `Валюта ${code} (${args.name}) добавлена, дробных знаков: ${args.minor_units}`;
+    }),
+  );
+
+  const addRecurring = tool(
+    'create_recurring_payment',
+    'Завести регулярный ежемесячный платёж: аренду, подписку, интернет. '
+    + 'Срок задаётся либо числом месяца, либо признаком «последнее число». '
+    + 'Если сумма меняется от месяца к месяцу — не указывай её, бот спросит при оплате.',
+    {
+      title: z.string().min(1),
+      account_id: z.number().int().describe('с какого счёта платится'),
+      amount: z.number().positive().optional().describe('не указывай, если сумма плавающая'),
+      day_of_month: z.number().int().min(1).max(31).optional(),
+      is_last_day: z.boolean().default(false).describe('true — платёж в последний день месяца'),
+      category: z.string().optional(),
+      remind_days_before: z.number().int().min(0).max(30).default(3),
+    },
+    async (args) => guard(() => {
+      if (args.is_last_day === (args.day_of_month !== undefined)) {
+        return 'Укажи ровно одно: либо число месяца, либо признак последнего дня';
+      }
+      const acc = getAccount(db, args.account_id);
+      const isVariable = args.amount === undefined;
+
+      const id = createRecurring(db, {
+        title: args.title,
+        accountId: acc.id,
+        categoryId: categoryId(db, args.category, 'expense'),
+        amountMinor: isVariable ? null : toMinor(args.amount!, acc.currency),
+        currency: acc.currency,
+        dayOfMonth: args.is_last_day ? null : args.day_of_month!,
+        isLastDay: args.is_last_day,
+        isVariable,
+        remindDaysBefore: args.remind_days_before,
+      });
+
+      const when = args.is_last_day ? 'в последний день месяца' : `${args.day_of_month}-го числа`;
+      const sum = isVariable ? 'сумма плавающая' : formatMoney(toMinor(args.amount!, acc.currency), acc.currency);
+      return `Платёж создан (id=${id}): «${args.title}» ${when}, ${sum}, со счёта «${acc.name}»`;
+    }),
+  );
+
+  const listPayments = tool(
+    'list_recurring_payments',
+    'Все настроенные регулярные платежи.',
+    {},
+    async () => guard(() => {
+      const rows = listRecurring(db).map((r) => ({
+        id: r.id,
+        title: r.title,
+        when: r.is_last_day ? 'последний день месяца' : `${r.day_of_month}-е число`,
+        amount: r.amount_minor === null ? 'плавающая' : formatMoney(r.amount_minor, r.currency),
+        currency: r.currency,
+        remind_days_before: r.remind_days_before,
+      }));
+      return rows.length === 0 ? 'Регулярных платежей нет' : JSON.stringify(rows, null, 1);
+    }),
+  );
+
+  const deleteRecurring = tool(
+    'delete_recurring_payment',
+    'Убрать регулярный платёж. Уже записанные операции по нему сохраняются.',
+    { recurring_id: z.number().int() },
+    async (args) => guard(() => {
+      const row = db.prepare('SELECT title FROM recurring_payments WHERE id = ?')
+        .get(args.recurring_id) as { title: string } | undefined;
+      if (!row) return `Платежа ${args.recurring_id} нет`;
+
+      db.prepare('UPDATE recurring_payments SET is_active = 0 WHERE id = ?')
+        .run(args.recurring_id);
+      return `Платёж «${row.title}» убран`;
     }),
   );
 
@@ -289,6 +455,8 @@ export function buildTools(db: Db, today: () => string) {
       recordExpense, recordIncome, transfer, deleteTx,
       queryDb, accounts, due, payPayment, setRecurringAmount,
       exchangeRate, totalInBase,
+      addAccount, renameAccount, archiveAccount, addCurrency,
+      addRecurring, listPayments, deleteRecurring,
     ],
   });
 }
@@ -298,4 +466,6 @@ export const TOOL_NAMES = [
   'record_expense', 'record_income', 'record_transfer', 'delete_transaction',
   'query_db', 'list_accounts', 'list_due_payments', 'mark_payment_paid',
   'set_recurring_amount', 'get_exchange_rate', 'total_in_base',
+  'create_account', 'rename_account', 'archive_account', 'add_currency',
+  'create_recurring_payment', 'list_recurring_payments', 'delete_recurring_payment',
 ].map((n) => `mcp__finance__${n}`);

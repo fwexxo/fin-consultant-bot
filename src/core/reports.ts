@@ -2,6 +2,7 @@ import type { Db } from '../db/index.ts';
 import type { Period } from './dates.ts';
 import { convertMinor, RATE_SCALE } from './money.ts';
 import { totalInBase } from './transactions.ts';
+import { getBaseCurrency } from './fx.ts';
 
 /**
  * Расходы по категориям за период в базовой валюте.
@@ -77,15 +78,15 @@ export function unpaidObligations(db: Db, period: Period): number {
 
   let total = 0;
   for (const r of rows) {
-    if (r.currency === 'BYN') {
+    if (r.currency === getBaseCurrency()) {
       total += convertMinor(r.amount_minor, RATE_SCALE);
       continue;
     }
     const rateRow = db.prepare(`
       SELECT rate FROM fx_rates
-      WHERE base = 'BYN' AND quote = ?
+      WHERE base = ? AND quote = ?
       ORDER BY abs(julianday(date) - julianday(?)) LIMIT 1
-    `).get(r.currency, r.due_date) as { rate: number } | undefined;
+    `).get(getBaseCurrency(), r.currency, r.due_date) as { rate: number } | undefined;
 
     if (rateRow === undefined) continue;
     total += convertMinor(r.amount_minor, rateRow.rate);

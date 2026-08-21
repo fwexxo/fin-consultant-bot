@@ -1,6 +1,6 @@
 import type { Db } from '../db/index.ts';
 import type { IsoDate } from './dates.ts';
-import { getRate, type RateFetcher } from './fx.ts';
+import { getRate, type RatesFetcher } from './fx.ts';
 import { convertMinor, RATE_SCALE } from './money.ts';
 import { getAccount, listAccounts, accountBalance } from './accounts.ts';
 
@@ -12,7 +12,7 @@ export interface TxInput {
   categoryId?: number | null;
   note?: string | null;
   rawText?: string | null;
-  rateFetcher?: RateFetcher;
+  rateFetcher?: RatesFetcher;
 }
 
 export interface TransferInput {
@@ -22,7 +22,7 @@ export interface TransferInput {
   toAccountId: number;
   toAmountMinor: number;
   note?: string | null;
-  rateFetcher?: RateFetcher;
+  rateFetcher?: RatesFetcher;
 }
 
 const INSERT_TX = `

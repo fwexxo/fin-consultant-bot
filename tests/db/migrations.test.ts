@@ -19,7 +19,7 @@ test('миграции создают все таблицы', () => {
     "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
   ).all() as { name: string }[]).map((r) => r.name);
 
-  for (const t of ['accounts', 'budgets', 'categories', 'fx_rates',
+  for (const t of ['accounts', 'budgets', 'categories', 'currencies', 'fx_rates',
     'payment_instances', 'recurring_payments',
     'schema_migrations', 'transactions']) {
     assert.ok(names.includes(t), `нет таблицы ${t}`);
@@ -83,11 +83,28 @@ test('отрицательная сумма транзакции отверга�
   }, /CHECK/);
 });
 
-test('неизвестная валюта отвергается', () => {
+test('незаведённая валюта отвергается внешним ключом', () => {
   const db = freshDb();
   assert.throws(() => {
-    db.prepare("INSERT INTO accounts (name,currency,kind) VALUES ('евро','EUR','cash')").run();
-  }, /CHECK/);
+    db.prepare("INSERT INTO accounts (name,currency,kind) VALUES ('нечто','ZZZ','cash')").run();
+  }, /FOREIGN KEY/);
+});
+
+test('валюту можно добавить, и счёт в ней заведётся', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO currencies (code,name,minor_units) VALUES ('SGD','Сингапурский доллар',2)").run();
+  db.prepare("INSERT INTO accounts (name,currency,kind) VALUES ('Сингапур','SGD','card')").run();
+  const row = db.prepare("SELECT currency FROM accounts WHERE name='Сингапур'").get() as { currency: string };
+  assert.equal(row.currency, 'SGD');
+});
+
+test('валюты со странной дробной частью заведены верно', () => {
+  const db = freshDb();
+  const get = (c: string) => (db.prepare('SELECT minor_units u FROM currencies WHERE code = ?')
+    .get(c) as { u: number } | undefined)?.u;
+  assert.equal(get('USD'), 2);
+  assert.equal(get('JPY'), 0, 'у иены нет дробной части');
+  assert.equal(get('KWD'), 3, 'у кувейтского динара тысяча фильсов');
 });
 
 test('правило платежа не может задавать срок двумя способами', () => {

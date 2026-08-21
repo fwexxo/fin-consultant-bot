@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { testDb, flatRate, fixedRates } from '../helpers.ts';
 import { openDatabase } from '../../src/db/index.ts';
 import { runMigrations } from '../../src/db/migrations.ts';
 import { createAccount } from '../../src/core/accounts.ts';
@@ -10,8 +11,7 @@ import {
 } from '../../src/core/reports.ts';
 
 function setup() {
-  const db = openDatabase(':memory:');
-  runMigrations(db);
+  const db = testDb();
   const byn = createAccount(db, { name: 'BYN', currency: 'BYN', kind: 'card' });
   const cat = (n: string) => (db.prepare(
     "SELECT id FROM categories WHERE name = ? AND kind = 'expense'",
@@ -19,7 +19,7 @@ function setup() {
   return { db, byn, cat };
 }
 
-const rate = (v: number) => async () => v;
+const rate = (v: number) => flatRate(v);
 
 test('expensesByCategory группирует и суммирует', async () => {
   const { db, byn, cat } = setup();

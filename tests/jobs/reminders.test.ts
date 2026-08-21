@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { testDb, flatRate, fixedRates } from '../helpers.ts';
 import { openDatabase } from '../../src/db/index.ts';
 import { runMigrations } from '../../src/db/migrations.ts';
 import { createAccount } from '../../src/core/accounts.ts';
@@ -7,8 +8,7 @@ import { createRecurring, markPaid } from '../../src/core/recurring.ts';
 import { collectReminders } from '../../src/jobs/reminders.ts';
 
 function setup() {
-  const db = openDatabase(':memory:');
-  runMigrations(db);
+  const db = testDb();
   const byn = createAccount(db, { name: 'BYN', currency: 'BYN', kind: 'card' });
   return { db, byn };
 }
@@ -57,7 +57,7 @@ test('оплаченный платёж больше не напоминает',
   collectReminders(db, '2026-08-13');
 
   const inst = db.prepare('SELECT id FROM payment_instances').get() as { id: number };
-  await markPaid(db, inst.id, 3_000, '2026-08-14', async () => 1);
+  await markPaid(db, inst.id, 3_000, '2026-08-14', flatRate(1));
 
   assert.equal(collectReminders(db, '2026-08-14').length, 0);
 });

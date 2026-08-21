@@ -4,6 +4,7 @@ import { loadConfig } from '../config.ts';
 import { openDatabase } from '../db/index.ts';
 import { runMigrations } from '../db/migrations.ts';
 import { ingestSms, formatIngestSummary, type IncomingSms } from '../ingest/sms-ingest.ts';
+import { initCurrencies } from '../core/init.ts';
 
 /**
  * Принимает пачку СМС и записывает новые операции.
@@ -43,6 +44,7 @@ try {
 
 const db = openDatabase(cfg.databasePath);
 runMigrations(db);
+initCurrencies(db, cfg.baseCurrency, process.env.FX_SOURCE);
 
 try {
   const result = await ingestSms(db, messages, {

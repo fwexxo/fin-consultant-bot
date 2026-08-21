@@ -6,10 +6,12 @@ import { Queue } from './claude/queue.ts';
 import { createBot } from './bot/index.ts';
 import { startReminders } from './jobs/reminders.ts';
 import { loadWhisperConfig, createWhisperTranscriber } from './speech/whisper.ts';
+import { initCurrencies } from './core/init.ts';
 
 const cfg = loadConfig(process.env);
 const db = openDatabase(cfg.databasePath);
 runMigrations(db);
+initCurrencies(db, cfg.baseCurrency, process.env.FX_SOURCE);
 
 const queue = new Queue();
 

@@ -1,17 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { testDb, flatRate, fixedRates } from '../helpers.ts';
 import { openDatabase } from '../../src/db/index.ts';
 import { runMigrations } from '../../src/db/migrations.ts';
 import { createAccount, listAccounts, accountBalance } from '../../src/core/accounts.ts';
 import { recordTransaction, recordTransfer, totalInBase } from '../../src/core/transactions.ts';
 
 function freshDb() {
-  const db = openDatabase(':memory:');
-  runMigrations(db);
+  const db = testDb();
   return db;
 }
 
-const rate = (v: number) => async () => v;
+const rate = (v: number) => flatRate(v);
 
 test('createAccount возвращает id и счёт появляется в списке', () => {
   const db = freshDb();
@@ -72,7 +72,7 @@ test('перевод между счетами не меняет общий ит
     ts: '2026-08-19',
     fromAccountId: byn, fromAmountMinor: 10_000,
     toAccountId: usd, toAmountMinor: 2_941,
-    rateFetcher: async (c) => (c === 'USD' ? 3.4 : 1),
+    rateFetcher: fixedRates({ USD: 3.4, BYN: 1 }),
   });
 
   assert.equal(accountBalance(db, byn), 24_000);
