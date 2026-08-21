@@ -100,6 +100,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Холостой прогон: показать, что нашлось, ничего не отправляя и не
+  // сдвигая отметку. Нужен, чтобы проверять доступ к базе и разбор
+  // без записи в настоящую бухгалтерию.
+  if (process.env.SMS_DRY_RUN === '1') {
+    console.log(`холостой прогон: нашлось ${mine.length} (просмотрено ${fresh.length})`);
+    for (const s of mine.slice(0, 10)) {
+      console.log(`  ${s.date} ${s.text.slice(0, 90)}`);
+    }
+    console.log('отметка не сдвинута, на сервер ничего не ушло');
+    return;
+  }
+
   const payload = JSON.stringify(mine.map((s) => ({
     rowid: s.rowid, date: s.date, text: s.text,
   })));
