@@ -1,5 +1,4 @@
 import cron from 'node-cron';
-import { InlineKeyboard } from 'grammy';
 import type { Bot } from 'grammy';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/index.ts';
@@ -7,7 +6,7 @@ import {
   ensureInstances, dueSoon, markNotified, type DueInstance,
 } from '../core/recurring.ts';
 import { currentPeriod, type IsoDate } from '../core/dates.ts';
-import { formatMoney } from '../core/money.ts';
+import { renderDue, fetchInstances } from '../bot/due-message.ts';
 
 /**
  * Достраивает инстансы текущего месяца и возвращает те, о которых
@@ -43,23 +42,15 @@ export function startReminders(deps: { cfg: Config; db: Db; bot: Bot }): void {
       return;
     }
 
-    for (const d of due) {
-      const amount = d.amount_minor === null
-        ? 'сумма плавающая — напиши фактическую'
-        : formatMoney(d.amount_minor, d.currency);
-      const overdue = d.due_date < today ? ' (просрочен)' : '';
-      const kb = new InlineKeyboard().text('Оплачено', `paid:${d.id}`);
+    if (due.length === 0) return;
 
-      try {
-        await bot.api.sendMessage(
-          ownerId,
-          `Платёж: ${d.title}\n${amount}\nСрок: ${d.due_date}${overdue}`,
-          { reply_markup: kb },
-        );
-      } catch (err) {
-        // Сбой одного сообщения не должен ронять остальные напоминания.
-        console.error(`Не отправилось напоминание ${d.id}:`, err);
-      }
+    // Одно сообщение на все платежи: пять писем каждое утро человек
+    // начинает пролистывать не читая, и просроченное тонет вместе с ними.
+    const { text, keyboard } = renderDue(fetchInstances(db, due.map((d) => d.id)), today);
+    try {
+      await bot.api.sendMessage(ownerId, text, { reply_markup: keyboard });
+    } catch (err) {
+      console.error('Не отправились напоминания:', err);
     }
   }, { timezone: cfg.timezone });
 

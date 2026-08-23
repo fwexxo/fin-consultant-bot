@@ -6,7 +6,10 @@ import {
   listAccounts, accountBalance, getAccount, createAccount,
 } from '../core/accounts.ts';
 import { recordTransaction, recordTransfer } from '../core/transactions.ts';
-import { dueSoon, markPaid, createRecurring, listRecurring } from '../core/recurring.ts';
+import {
+  dueSoon, markPaid, createRecurring, listRecurring, findMatchingPending,
+  linkPaymentToTransaction,
+} from '../core/recurring.ts';
 import {
   toMinor, formatMoney, convertMinor, RATE_SCALE,
   isKnownCurrency, knownCurrencies, loadCurrencies,
@@ -85,8 +88,21 @@ export function buildTools(db: Db, today: () => string) {
         note: args.note ?? null,
       });
       const balance = accountBalance(db, args.account_id);
-      return `Расход записан (id=${id}): ${formatMoney(amountMinor, account.currency)} `
+      let text = `Расход записан (id=${id}): ${formatMoney(amountMinor, account.currency)} `
         + `со счёта «${account.name}». Остаток: ${formatMoney(balance, account.currency)}`;
+
+      // Если расход похож на неоплаченный регулярный платёж, подсказываем:
+      // иначе инстанс останется pending и бот продолжит напоминать.
+      const note = [args.note, args.category].filter(Boolean).join(' ') || null;
+      const matches = findMatchingPending(db, note, args.account_id);
+      if (matches.length > 0) {
+        const m = matches[0]!;
+        text += `\n\nВНИМАНИЕ: похоже, это регулярный платёж «${m.title}» `
+          + `(payment_id=${m.id}, срок ${m.due_date}), и он ещё числится неоплаченным. `
+          + 'Если это он — удали эту запись через delete_transaction и отметь платёж '
+          + 'через mark_payment_paid, иначе бот будет напоминать о нём каждый день.';
+      }
+      return text;
     }),
   );
 
@@ -448,6 +464,22 @@ export function buildTools(db: Db, today: () => string) {
     }),
   );
 
+  const linkPayment = tool(
+    'link_payment_to_transaction',
+    'Связать уже записанный расход с регулярным платежом и закрыть его. '
+    + 'Используй, когда трата попала в бота обычным расходом, а на деле это был '
+    + 'платёж из списка регулярных: так он перестанет числиться неоплаченным.',
+    {
+      payment_id: z.number().int().describe('id из list_due_payments'),
+      transaction_id: z.number().int().describe('id уже записанной операции'),
+    },
+    async (args) => guard(() => {
+      const r = linkPaymentToTransaction(db, args.payment_id, args.transaction_id);
+      return `«${r.title}» отмечен оплаченным: ${formatMoney(r.amountMinor, r.currency)} `
+        + `(операция ${args.transaction_id}). Напоминаний больше не будет.`;
+    }),
+  );
+
   return createSdkMcpServer({
     name: 'finance',
     version: '1.0.0',
@@ -456,7 +488,7 @@ export function buildTools(db: Db, today: () => string) {
       queryDb, accounts, due, payPayment, setRecurringAmount,
       exchangeRate, totalInBase,
       addAccount, renameAccount, archiveAccount, addCurrency,
-      addRecurring, listPayments, deleteRecurring,
+      addRecurring, listPayments, deleteRecurring, linkPayment,
     ],
   });
 }
@@ -468,4 +500,5 @@ export const TOOL_NAMES = [
   'set_recurring_amount', 'get_exchange_rate', 'total_in_base',
   'create_account', 'rename_account', 'archive_account', 'add_currency',
   'create_recurring_payment', 'list_recurring_payments', 'delete_recurring_payment',
+  'link_payment_to_transaction',
 ].map((n) => `mcp__finance__${n}`);
