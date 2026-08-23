@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from 'grammy';
+import { Bot } from 'grammy';
 import type { Context } from 'grammy';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/index.ts';
@@ -10,6 +10,7 @@ import { expensesByCategory, monthSummary, forecast } from '../core/reports.ts';
 import { dueSoon, markPaid } from '../core/recurring.ts';
 import { formatMoney } from '../core/money.ts';
 import { currentPeriod } from '../core/dates.ts';
+import { renderDue, fetchInstances, idsFromKeyboard } from './due-message.ts';
 import { downloadTelegramFile, toImageAttachment, type ImageAttachment } from './media.ts';
 import type { Transcriber } from '../speech/whisper.ts';
 
@@ -128,15 +129,8 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply('Ближайших платежей нет.');
       return;
     }
-    for (const r of rows) {
-      const amount = r.amount_minor === null
-        ? 'сумма плавающая'
-        : formatMoney(r.amount_minor, r.currency);
-      const overdue = r.due_date < today() ? ' (просрочен)' : '';
-      await ctx.reply(`${r.title} — ${amount}\nСрок: ${r.due_date}${overdue}`, {
-        reply_markup: new InlineKeyboard().text('Оплачено', `paid:${r.id}`),
-      });
-    }
+    const { text, keyboard } = renderDue(fetchInstances(db, rows.map((r) => r.id)), today());
+    await ctx.reply(text, { reply_markup: keyboard });
   });
 
   bot.command('forecast', async (ctx) => {
@@ -182,9 +176,14 @@ export function createBot(deps: BotDeps): Bot {
 
     try {
       await markPaid(db, instanceId, row.amount_minor, today());
-      await ctx.editMessageText(
-        `${row.title} — оплачено\n${formatMoney(row.amount_minor, row.currency)}`,
-      );
+
+      // Сообщение общее на несколько платежей, поэтому перерисовываем его
+      // целиком по актуальной базе. Список платежей берём из кнопок самого
+      // сообщения — так ничего не нужно помнить между перезапусками.
+      const ids = idsFromKeyboard(ctx.callbackQuery.message?.reply_markup);
+      const shown = ids.length > 0 ? ids : [instanceId];
+      const { text, keyboard } = renderDue(fetchInstances(db, shown), today());
+      await ctx.editMessageText(text, { reply_markup: keyboard });
       await ctx.answerCallbackQuery('Записано');
     } catch (err) {
       await ctx.answerCallbackQuery(String((err as Error).message).slice(0, 190));
