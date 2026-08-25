@@ -171,8 +171,22 @@ const KIND_LABEL: Record<ParsedSms['kind'], string> = {
   cash_deposit: 'внесение наличных',
 };
 
+/**
+ * Порог, ниже которого о расхождении не сообщаем: 50 рублей.
+ *
+ * Мелкое расхождение обычно постоянное — банк округляет остаток, или пара
+ * копеек разошлась на самой первой сверке и с тех пор просто переносится.
+ * Предупреждать о нём при каждой покупке значит приучить не читать
+ * предупреждения вообще, и настоящую пропажу тогда тоже пролистают.
+ */
+export const DEFAULT_DRIFT_ALERT_MINOR = 5_000;
+
 /** Человеческая сводка для отправки в Телеграм. */
-export function formatIngestSummary(r: IngestResult, cardAccountName: string): string | null {
+export function formatIngestSummary(
+  r: IngestResult,
+  cardAccountName: string,
+  driftAlertMinor: number = DEFAULT_DRIFT_ALERT_MINOR,
+): string | null {
   if (r.recorded.length === 0) return null;
 
   const lines = r.recorded.map((op) => {
@@ -184,7 +198,10 @@ export function formatIngestSummary(r: IngestResult, cardAccountName: string): s
 
   let text = `Записал с «${cardAccountName}»:\n${lines.join('\n')}`;
 
-  if (r.drift && r.drift.driftMinor !== 0) {
+  // Сверка всё равно пишется в balance_checks — молчим только в сообщении,
+  // историю расхождений это не обрезает.
+  const drift = r.drift?.driftMinor ?? 0;
+  if (r.drift && drift !== 0 && Math.abs(drift) >= driftAlertMinor) {
     text += `\n\n⚠️ Расхождение с банком: ${formatMoney(r.drift.driftMinor, 'RUB')}.`
       + `\nУ банка ${formatMoney(r.drift.bankMinor, 'RUB')}, у меня ${formatMoney(r.drift.oursMinor, 'RUB')}.`
       + `\nВероятно, часть операций не попала в бота.`;

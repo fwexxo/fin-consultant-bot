@@ -3,7 +3,9 @@ import { Bot } from 'grammy';
 import { loadConfig } from '../config.ts';
 import { openDatabase } from '../db/index.ts';
 import { runMigrations } from '../db/migrations.ts';
-import { ingestSms, formatIngestSummary, type IncomingSms } from '../ingest/sms-ingest.ts';
+import {
+  ingestSms, formatIngestSummary, DEFAULT_DRIFT_ALERT_MINOR, type IncomingSms,
+} from '../ingest/sms-ingest.ts';
 import { initCurrencies } from '../core/init.ts';
 
 /**
@@ -26,6 +28,18 @@ const card = process.env.SMS_CARD?.trim();
 const cardAccountName = process.env.SMS_CARD_ACCOUNT?.trim();
 const cashAccountName = process.env.SMS_CASH_ACCOUNT?.trim() || 'Наличные RUB';
 const sinceDate = process.env.SMS_SINCE?.trim();
+const driftAlert = parseDriftAlert(process.env.SMS_DRIFT_ALERT);
+
+/** Порог задаётся в рублях, внутри считаем в копейках. */
+function parseDriftAlert(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_DRIFT_ALERT_MINOR;
+  const rub = Number(raw.trim().replace(',', '.'));
+  if (!Number.isFinite(rub) || rub < 0) {
+    console.error(`SMS_DRIFT_ALERT=«${raw}» — не число, беру значение по умолчанию`);
+    return DEFAULT_DRIFT_ALERT_MINOR;
+  }
+  return Math.round(rub * 100);
+}
 
 if (!card || !cardAccountName || !sinceDate) {
   console.error('Нужны SMS_CARD, SMS_CARD_ACCOUNT и SMS_SINCE в окружении');
@@ -51,7 +65,7 @@ try {
     card, cardAccountName, cashAccountName, sinceDate,
   });
 
-  const summary = formatIngestSummary(result, cardAccountName);
+  const summary = formatIngestSummary(result, cardAccountName, driftAlert);
 
   // SMS_NOTIFY=0 глушит отправку — нужно, чтобы проверки на копии базы
   // не слали владельцу сообщения о несуществующих операциях.
