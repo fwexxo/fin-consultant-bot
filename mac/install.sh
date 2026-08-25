@@ -51,6 +51,7 @@ sed -e "s|__NODE__|$NODE|g" \
     -e "s|__SMS_SINCE__|$SMS_SINCE|g" \
     -e "s|__SMS_SENDER__|$SMS_SENDER|g" \
     -e "s|__REMOTE_APP__|$REMOTE_APP|g" \
+    -e "s|__HOME__|$HOME|g" \
     "$APP/mac/watcher.plist.template" > "$PLIST"
 
 # bootout может не найти задание при первой установке — это не ошибка.

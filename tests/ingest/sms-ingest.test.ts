@@ -161,7 +161,7 @@ test('отсутствие счёта карты — явная ошибка, а
 test('сводка пустая, когда записывать нечего', () => {
   assert.equal(formatIngestSummary({
     seen: 0, skippedDuplicate: 0, skippedTooOld: 0, skippedUnparsed: 0,
-    recorded: [], drift: null,
+    recorded: [], drift: null, balances: [],
   }, 'Карта RUB'), null);
 });
 
@@ -173,6 +173,7 @@ test('сводка перечисляет операции и предупреж
       original: { amount: 14, currency: 'BYN' },
     }],
     drift: { bankMinor: 90_000, oursMinor: 80_000, driftMinor: -10_000 },
+    balances: [],
   }, 'Карта RUB');
 
   assert.ok(text);
@@ -187,6 +188,7 @@ test('сводка не поднимает тревогу, когда балан
     seen: 1, skippedDuplicate: 0, skippedTooOld: 0, skippedUnparsed: 0,
     recorded: [{ kind: 'expense', date: '2026-08-22', amountRub: 100, merchant: 'Магазин' }],
     drift: { bankMinor: 90_000, oursMinor: 90_000, driftMinor: 0 },
+    balances: [],
   }, 'Карта RUB');
 
   assert.ok(text);
@@ -197,6 +199,7 @@ const oneOp = (driftMinor: number) => ({
   seen: 1, skippedDuplicate: 0, skippedTooOld: 0, skippedUnparsed: 0,
   recorded: [{ kind: 'expense' as const, date: '2026-08-25', amountRub: 100, merchant: 'Магазин' }],
   drift: { bankMinor: 100_000, oursMinor: 100_000 + driftMinor, driftMinor },
+  balances: [],
 });
 
 test('расхождение в пять копеек не поднимает тревогу', () => {
@@ -237,4 +240,48 @@ test('нулевой порог возвращает старое поведен
     formatIngestSummary(oneOp(0), 'Карта RUB', 0)!, /Расхождение/,
     'при точном совпадении говорить не о чем',
   );
+});
+
+test('после записи видно, сколько осталось', async () => {
+  const { db, card } = setup();
+  const r = await ingestSms(db, [
+    sms(1, '2026-08-25', 'Счёт карты MIR-0000 23:18 Покупка 101р GGS Баланс: 1969.17р'),
+  ], OPTS);
+
+  assert.deepEqual(r.balances, [
+    { name: 'Карта RUB', minor: accountBalance(db, card), currency: 'RUB' },
+  ]);
+
+  const text = formatIngestSummary(r, 'Карта RUB')!;
+  assert.match(text, /Остаток «Карта RUB»: -101\.00 RUB/);
+});
+
+test('при снятии наличных показываются оба счёта', async () => {
+  const { db } = setup();
+  const r = await ingestSms(db, [
+    sms(1, '2026-08-25', 'Счёт карты MIR-0000 18:45 Выдача 50 000р ATM 1 Баланс: 20 914.4р'),
+  ], OPTS);
+
+  assert.deepEqual(r.balances.map((b) => b.name), ['Карта RUB', 'Наличные RUB']);
+  const text = formatIngestSummary(r, 'Карта RUB')!;
+  assert.match(text, /Остаток «Наличные RUB»: 50000\.00 RUB/);
+});
+
+test('нетронутые наличные в сводку не лезут', async () => {
+  const { db } = setup();
+  const r = await ingestSms(db, [
+    sms(1, '2026-08-25', 'Счёт карты MIR-0000 13:22 Покупка 100р Магазин Баланс: 900р'),
+  ], OPTS);
+
+  assert.deepEqual(r.balances.map((b) => b.name), ['Карта RUB']);
+});
+
+test('без записанных операций остатки не собираются', async () => {
+  const { db } = setup();
+  const r = await ingestSms(db, [
+    sms(1, '2026-08-21', 'Счёт карты MIR-0000 10:00 Покупка 500р Вчера Баланс: 100р'),
+  ], OPTS);
+
+  assert.equal(r.skippedTooOld, 1);
+  assert.deepEqual(r.balances, [], 'молчим целиком, когда записывать нечего');
 });

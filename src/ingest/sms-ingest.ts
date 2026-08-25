@@ -1,4 +1,5 @@
 import type { Db } from '../db/index.ts';
+import type { Currency } from '../config.ts';
 import { parseSms, type ParsedSms } from '../core/sms.ts';
 import { toMinor, formatMoney } from '../core/money.ts';
 import {
@@ -36,6 +37,8 @@ export interface IngestResult {
   recorded: IngestedOp[];
   /** Расхождение с банком в копейках; null — сверка не проводилась. */
   drift: { bankMinor: number; oursMinor: number; driftMinor: number } | null;
+  /** Остатки по затронутым счетам после записи — ради них всё и затевалось. */
+  balances: { name: string; minor: number; currency: Currency }[];
 }
 
 function findOrCreateAccount(db: Db, name: string, currency: 'RUB'): Account {
@@ -63,6 +66,7 @@ export async function ingestSms(
     skippedUnparsed: 0,
     recorded: [],
     drift: null,
+    balances: [],
   };
 
   const cardAccount = listAccounts(db).find((a) => a.name === opts.cardAccountName);
@@ -148,6 +152,30 @@ export async function ingestSms(
     lastBalanceRub = ops[ops.length - 1]!.balanceRub;
   }
 
+  // Остаток по карте показываем всегда, по наличным — только если их
+  // сегодня трогали: лишняя строка про нетронутый счёт только мешает.
+  if (result.recorded.length > 0) {
+    result.balances.push({
+      name: cardAccount.name,
+      minor: accountBalance(db, cardAccount.id),
+      currency: cardAccount.currency,
+    });
+
+    const touchedCash = result.recorded.some(
+      (op) => op.kind === 'cash_withdrawal' || op.kind === 'cash_deposit',
+    );
+    if (touchedCash) {
+      const cash = listAccounts(db).find((a) => a.name === opts.cashAccountName);
+      if (cash) {
+        result.balances.push({
+          name: cash.name,
+          minor: accountBalance(db, cash.id),
+          currency: cash.currency,
+        });
+      }
+    }
+  }
+
   // Сверка с банком по последнему присланному остатку.
   if (lastBalanceRub !== null) {
     const bankMinor = toMinor(lastBalanceRub, 'RUB');
@@ -197,6 +225,14 @@ export function formatIngestSummary(
   });
 
   let text = `Записал с «${cardAccountName}»:\n${lines.join('\n')}`;
+
+  // Главный вопрос после траты — сколько осталось. Без этой строки
+  // за ответом приходится лезть в бота отдельной командой.
+  if (r.balances.length > 0) {
+    text += `\n\n${r.balances
+      .map((b) => `Остаток «${b.name}»: ${formatMoney(b.minor, b.currency)}`)
+      .join('\n')}`;
+  }
 
   // Сверка всё равно пишется в balance_checks — молчим только в сообщении,
   // историю расхождений это не обрезает.
