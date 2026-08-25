@@ -4,7 +4,9 @@ import { testDb, flatRate, fixedRates } from '../helpers.ts';
 import { openDatabase } from '../../src/db/index.ts';
 import { runMigrations } from '../../src/db/migrations.ts';
 import { createAccount, accountBalance, listAccounts } from '../../src/core/accounts.ts';
-import { ingestSms, formatIngestSummary } from '../../src/ingest/sms-ingest.ts';
+import {
+  ingestSms, formatIngestSummary, DEFAULT_DRIFT_ALERT_MINOR,
+} from '../../src/ingest/sms-ingest.ts';
 
 const OPTS = {
   card: 'MIR-0000',
@@ -189,4 +191,50 @@ test('сводка не поднимает тревогу, когда балан
 
   assert.ok(text);
   assert.doesNotMatch(text, /Расхождение/);
+});
+
+const oneOp = (driftMinor: number) => ({
+  seen: 1, skippedDuplicate: 0, skippedTooOld: 0, skippedUnparsed: 0,
+  recorded: [{ kind: 'expense' as const, date: '2026-08-25', amountRub: 100, merchant: 'Магазин' }],
+  drift: { bankMinor: 100_000, oursMinor: 100_000 + driftMinor, driftMinor },
+});
+
+test('расхождение в пять копеек не поднимает тревогу', () => {
+  const text = formatIngestSummary(oneOp(-5), 'Карта RUB');
+  assert.ok(text);
+  assert.match(text, /Магазин/, 'сами операции показать всё равно надо');
+  assert.doesNotMatch(text, /Расхождение/);
+});
+
+test('расхождение ровно на порог уже показывается', () => {
+  const text = formatIngestSummary(oneOp(-DEFAULT_DRIFT_ALERT_MINOR), 'Карта RUB')!;
+  assert.match(text, /Расхождение/);
+});
+
+test('на копейку меньше порога — тишина', () => {
+  const text = formatIngestSummary(oneOp(DEFAULT_DRIFT_ALERT_MINOR - 1), 'Карта RUB')!;
+  assert.doesNotMatch(text, /Расхождение/);
+});
+
+test('порог смотрит на модуль: недостача и излишек равноправны', () => {
+  const big = DEFAULT_DRIFT_ALERT_MINOR + 1;
+  assert.match(formatIngestSummary(oneOp(big), 'Карта RUB')!, /Расхождение/);
+  assert.match(formatIngestSummary(oneOp(-big), 'Карта RUB')!, /Расхождение/);
+});
+
+test('свой порог перекрывает значение по умолчанию', () => {
+  const drift = oneOp(-10_000);
+  assert.match(formatIngestSummary(drift, 'Карта RUB')!, /Расхождение/, '100 руб выше 50');
+  assert.doesNotMatch(
+    formatIngestSummary(drift, 'Карта RUB', 20_000)!, /Расхождение/,
+    'при пороге 200 руб сотня должна молчать',
+  );
+});
+
+test('нулевой порог возвращает старое поведение', () => {
+  assert.match(formatIngestSummary(oneOp(-5), 'Карта RUB', 0)!, /Расхождение/);
+  assert.doesNotMatch(
+    formatIngestSummary(oneOp(0), 'Карта RUB', 0)!, /Расхождение/,
+    'при точном совпадении говорить не о чем',
+  );
 });
