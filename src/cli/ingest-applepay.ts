@@ -3,7 +3,9 @@ import { Bot } from 'grammy';
 import { loadConfig } from '../config.ts';
 import { openDatabase } from '../db/index.ts';
 import { runMigrations } from '../db/migrations.ts';
-import { ingestApplePay, formatApplePaySummary, type ApplePayEvent } from '../ingest/applepay.ts';
+import {
+  ingestApplePay, formatApplePaySummary, parseEvents, type ApplePayEvent,
+} from '../ingest/applepay.ts';
 import { initCurrencies } from '../core/init.ts';
 
 /**
@@ -39,8 +41,7 @@ if (raw === '') {
 
 let events: ApplePayEvent[];
 try {
-  const parsed: unknown = JSON.parse(raw);
-  events = Array.isArray(parsed) ? parsed as ApplePayEvent[] : [parsed as ApplePayEvent];
+  events = parseEvents(raw);
 } catch (err) {
   console.error(`Не разобрал вход: ${(err as Error).message}`);
   process.exit(2);
