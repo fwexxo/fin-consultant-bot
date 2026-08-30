@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { testDb, flatRate, fixedRates } from '../helpers.ts';
 import { createAccount, accountBalance } from '../../src/core/accounts.ts';
 import {
-  parseAmount, parseCurrency, ingestApplePay, formatApplePaySummary,
+  parseAmount, parseCurrency, ingestApplePay, formatApplePaySummary, parseEvents,
 } from '../../src/ingest/applepay.ts';
 
 const OPTS = { accountName: 'Карта BYN', today: '2026-08-26' as const };
@@ -124,12 +124,11 @@ test('две одинаковые покупки подряд — две зап�
   assert.equal(accountBalance(db, byn), -4454, 'совпадение сумм не повод терять покупку');
 });
 
-test('без идентификатора не записываем: защиты от дублей не будет', async () => {
+test('оплата без идентификатора всё равно записывается', async () => {
   const { db, byn } = setup();
   const r = await ingestApplePay(db, [ev({ id: '' })], OPTS);
-  assert.equal(r.recorded.length, 0);
-  assert.match(r.rejected[0]!.reason, /идентификатор/);
-  assert.equal(accountBalance(db, byn), 0);
+  assert.equal(r.recorded.length, 1, 'iOS не даёт идентификатора — терять оплату нельзя');
+  assert.equal(accountBalance(db, byn), -2227);
 });
 
 test('нечитаемая сумма отвергается, остальные из пачки проходят', async () => {
@@ -208,7 +207,8 @@ test('сводка показывает трату и остаток', async () 
 
 test('без записей сводки нет', async () => {
   const { db } = setup();
-  const r = await ingestApplePay(db, [ev({ id: '' })], OPTS);
+  const r = await ingestApplePay(db, [ev({ amount: 'мусор' })], OPTS);
+  assert.equal(r.recorded.length, 0);
   assert.equal(formatApplePaySummary(r), null);
 });
 
@@ -238,4 +238,100 @@ test('обратный пересчёт не теряет копейки на н
 
   const rub = r.recorded[0]!.amountMinor;
   assert.ok(Math.abs(rub - 305_000) <= 2, `ожидали ~3050 RUB, получили ${rub / 100}`);
+});
+
+// --- формат, который присылает быстрая команда с айфона ---
+
+test('построчный формат разбирается', () => {
+  const [e] = parseEvents('amount: 22,27 Br\nmerchant: EVROOPT');
+  assert.equal(e!.amount, '22,27 Br');
+  assert.equal(e!.merchant, 'EVROOPT');
+  assert.equal(e!.currency, '22,27 Br', 'валюту ищем в самой сумме');
+});
+
+test('двоеточие внутри названия магазина не ломает разбор', () => {
+  const [e] = parseEvents('amount: 10.00\nmerchant: SHOP: THE BEST');
+  assert.equal(e!.merchant, 'SHOP: THE BEST');
+});
+
+test('кавычки в названии не теряют оплату', () => {
+  const [e] = parseEvents('amount: 5,00 Br\nmerchant: CAFE "У ДОМА"');
+  assert.equal(e!.merchant, 'CAFE "У ДОМА"');
+  assert.equal(parseAmount(e!.amount), 5);
+});
+
+test('name используется, когда продавец пуст', () => {
+  const [e] = parseEvents('amount: 3,00\nmerchant: \nname: Apple Pay покупка');
+  assert.equal(e!.merchant, 'Apple Pay покупка');
+});
+
+test('без строки amount разбор падает, а не молчит', () => {
+  assert.throws(() => parseEvents('merchant: X'), /amount/);
+});
+
+test('JSON тоже принимается', () => {
+  const [e] = parseEvents('{"id":"x","amount":"1,00","merchant":"Y"}');
+  assert.equal(e!.id, 'x');
+  assert.equal(e!.merchant, 'Y');
+});
+
+test('валюта достаётся из отформатированной суммы', () => {
+  assert.equal(parseCurrency('22,27 Br'), 'BYN');
+  assert.equal(parseCurrency('$9.99'), 'USD');
+  assert.equal(parseCurrency('1 234,56 BYN'), 'BYN');
+  assert.equal(parseCurrency('9,99 USD'), 'USD');
+  assert.equal(parseCurrency('56,72 ₽'), 'RUB');
+});
+
+test('слово из трёх букв в названии не принимается за валюту', () => {
+  assert.equal(parseCurrency('BRAND'), null, '«Br» внутри слова — не валюта');
+  assert.equal(parseCurrency('EVROOPT'), null);
+  assert.equal(parseCurrency('12.00'), null);
+});
+
+// --- защита от повторов без идентификатора ---
+
+test('одинаковая оплата подряд считается повторной доставкой', async () => {
+  const { db, byn } = setup();
+  const e = { amount: '22,27', merchant: 'EVROOPT' };
+
+  await ingestApplePay(db, [e], OPTS);
+  const r2 = await ingestApplePay(db, [e], OPTS);
+
+  assert.equal(r2.skippedDuplicate, 1);
+  assert.equal(accountBalance(db, byn), -2227, 'деньги не должны списаться дважды');
+  assert.equal(r2.maybeDuplicate.length, 1, 'но человека надо предупредить');
+});
+
+test('о непринятом повторе бот говорит вслух', async () => {
+  const { db } = setup();
+  const e = { amount: '22,27', merchant: 'EVROOPT' };
+  await ingestApplePay(db, [e], OPTS);
+
+  const text = formatApplePaySummary(await ingestApplePay(db, [e], OPTS))!;
+  assert.match(text, /повтор/i);
+  assert.match(text, /EVROOPT/);
+  assert.match(text, /скажи/i, 'должен быть выход, если это была вторая покупка');
+});
+
+test('за пределами окна одинаковая оплата записывается', async () => {
+  const { db, byn } = setup();
+  const e = { amount: '22,27', merchant: 'EVROOPT' };
+  await ingestApplePay(db, [e], OPTS);
+
+  // Отматываем отметку назад: имитируем покупку через час.
+  db.prepare("UPDATE sms_ingested SET ingested_at = datetime('now', '-1 hour')").run();
+
+  const r = await ingestApplePay(db, [e], OPTS);
+  assert.equal(r.recorded.length, 1);
+  assert.equal(accountBalance(db, byn), -4454);
+});
+
+test('разные магазины на одну сумму не путаются', async () => {
+  const { db, byn } = setup();
+  await ingestApplePay(db, [
+    { amount: '10,00', merchant: 'A' },
+    { amount: '10,00', merchant: 'B' },
+  ], OPTS);
+  assert.equal(accountBalance(db, byn), -2000);
 });
