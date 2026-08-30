@@ -36,6 +36,12 @@ ssh "$HOST" "cd $APP && npm ci --omit=dev"
 echo "==> Сервис"
 scp -q deploy/fin-bot.service "$HOST:/etc/systemd/system/fin-bot.service"
 scp -q deploy/backup.sh "$HOST:$APP/backup.sh"
+# Команда, к которой привязан ключ с телефона. Лежит ВНЕ $APP: иначе
+# рекурсивный chown ниже отдал бы её тому самому пользователю, которого
+# она ограничивает, и тот смог бы переписать себе доступ.
+scp -q deploy/applepay-receive.sh "$HOST:/usr/local/sbin/finbot-applepay-receive"
+scp -q deploy/applepay-run.sh "$HOST:/usr/local/sbin/finbot-applepay-run"
+ssh "$HOST" "chown root:root /usr/local/sbin/finbot-applepay-* && chmod 755 /usr/local/sbin/finbot-applepay-*"
 
 ssh "$HOST" bash -s <<REMOTE
 set -euo pipefail
